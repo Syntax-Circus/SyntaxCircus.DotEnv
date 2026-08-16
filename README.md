@@ -1,6 +1,7 @@
 # SyntaxCircus.DotEnv
 
 [![Build](https://github.com/Syntax-Circus/SyntaxCircus.DotEnv/actions/workflows/build.yml/badge.svg)](https://github.com/Syntax-Circus/SyntaxCircus.DotEnv/actions/workflows/build.yml)
+[![NuGet](https://img.shields.io/nuget/v/SyntaxCircus.DotEnv.svg)](https://www.nuget.org/packages/SyntaxCircus.DotEnv)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
 Reusable local dotenv configuration for ASP.NET Core hosts — and a second entry point for hosts that don't build an `IConfigurationBuilder` at all.
