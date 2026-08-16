@@ -6,9 +6,9 @@
     <PackageId>SyntaxCircus.DotEnv</PackageId>
     <Title>SyntaxCircus DotEnv</Title>
     <Description>Precedence-safe dotenv configuration loading for ASP.NET Core hosts (with optional per-host key prefixing for monorepos), plus a process-environment loader for non-config-builder hosts.</Description>
-    <Authors>SyntaxCircus</Authors>
-    <Company>SyntaxCircus</Company>
-    <Copyright>Copyright © SyntaxCircus</Copyright>
+    <Authors>Syntax Circus LLC</Authors>
+    <Company>Syntax Circus LLC</Company>
+    <Copyright>Copyright © Syntax Circus LLC</Copyright>
     <PackageTags>configuration;dotenv;aspnetcore;environment-variables</PackageTags>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
