@@ -13,7 +13,6 @@ public sealed class DotEnvOptions
 public static class DotEnvConfigurationExtensions
 {
     private static readonly string[] DotEnvFileNames = [".env", ".env.local"];
-    private static readonly string[] DotEnvProcessLoadOrder = [".env.local", ".env"];
 
     public static bool ShouldLoadDotEnv(this IConfiguration configuration, IHostEnvironment environment)
     {
@@ -49,13 +48,6 @@ public static class DotEnvConfigurationExtensions
         IReadOnlyCollection<string> reservedPrefixes = knownHostPrefixes is { Count: > 0 }
             ? knownHostPrefixes
             : string.IsNullOrWhiteSpace(hostPrefix) ? [] : [hostPrefix];
-
-        foreach (var fileName in DotEnvProcessLoadOrder)
-        {
-            Env.NoClobber()
-                .TraversePath()
-                .Load(Path.Combine(basePath, fileName));
-        }
 
         var insertIndex = FindEnvironmentOverrideInsertIndex(configurationBuilder);
         foreach (var fileName in DotEnvFileNames)
@@ -140,14 +132,35 @@ public static class DotEnvConfigurationExtensions
 
     private static int FindEnvironmentOverrideInsertIndex(IConfigurationBuilder configurationBuilder)
     {
-        for (var index = 0; index < configurationBuilder.Sources.Count; index++)
+        var sources = configurationBuilder.Sources;
+
+        // Dotenv values belong right after the last "base config" source (appsettings.json,
+        // any other file/memory-backed config) and right before whatever environment-variable
+        // or command-line source comes next. WebApplicationBuilder/HostApplicationBuilder add
+        // TWO of each kind: an early one (added before appsettings.json, used internally to
+        // resolve ASPNETCORE_ENVIRONMENT/content root/etc.) and a "real" one added after
+        // appsettings.json that's meant to win over it. Scanning for the last non-env/cmdline
+        // source and inserting right after it lands on the real one in both cases, whether or
+        // not command-line args are present (ChainedConfigurationSource is excluded from the
+        // "base config" scan because WebApplicationBuilder appends one at the very end, after
+        // both real sources).
+        var lastBaseConfigIndex = -1;
+        for (var index = 0; index < sources.Count; index++)
         {
-            if (configurationBuilder.Sources[index].GetType().Name is "EnvironmentVariablesConfigurationSource" or "CommandLineConfigurationSource")
+            if (sources[index].GetType().Name is not ("EnvironmentVariablesConfigurationSource" or "CommandLineConfigurationSource" or "ChainedConfigurationSource"))
+            {
+                lastBaseConfigIndex = index;
+            }
+        }
+
+        for (var index = lastBaseConfigIndex + 1; index < sources.Count; index++)
+        {
+            if (sources[index].GetType().Name is "EnvironmentVariablesConfigurationSource" or "CommandLineConfigurationSource")
             {
                 return index;
             }
         }
 
-        return configurationBuilder.Sources.Count;
+        return sources.Count;
     }
 }
