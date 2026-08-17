@@ -1,25 +1,16 @@
+using Microsoft.AspNetCore.Builder;
 using SyntaxCircus.DotEnv.Tests.Infrastructure;
 
 namespace SyntaxCircus.DotEnv.Tests;
 
 // These tests write real .env files to a per-test temp directory and load them for real via
-// DotNetEnv. Loading also has a side effect on the real process environment (via Env.NoClobber()
-// internally) — every test uses a Guid-prefixed variable name so it can never collide with
-// anything real, and unsets what it set in a finally block.
+// DotNetEnv. AddSyntaxCircusDotEnvFiles only ever writes into the given IConfigurationBuilder —
+// it never touches the real process environment — so no Environment cleanup is needed here.
 public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
 {
     private readonly TempDirectory _tempDirectory = new();
-    private readonly List<string> _envVarsToClean = [];
 
-    public void Dispose()
-    {
-        foreach (var key in _envVarsToClean)
-        {
-            Environment.SetEnvironmentVariable(key, null);
-        }
-
-        _tempDirectory.Dispose();
-    }
+    public void Dispose() => _tempDirectory.Dispose();
 
     private static string UniqueKey(string suffix) => $"SC_TEST_{Guid.NewGuid():N}_{suffix}";
 
@@ -55,7 +46,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void OnlyDotEnv_ValueApplied()
     {
         var key = UniqueKey("ONLY_ENV");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env", $"{key}=from-env\n");
 
         var builder = new ConfigurationBuilder();
@@ -69,7 +59,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void OnlyDotEnvLocal_ValueApplied()
     {
         var key = UniqueKey("ONLY_LOCAL");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env.local", $"{key}=from-local\n");
 
         var builder = new ConfigurationBuilder();
@@ -83,7 +72,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void BothFiles_LocalWinsOverEnv()
     {
         var key = UniqueKey("BOTH");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env", $"{key}=from-env\n");
         _tempDirectory.WriteFile(".env.local", $"{key}=from-local\n");
 
@@ -98,7 +86,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void DoubleUnderscore_MapsToConfigurationPathDelimiter()
     {
         var prefix = UniqueKey("SECTION");
-        _envVarsToClean.Add($"{prefix}__Child");
         _tempDirectory.WriteFile(".env", $"{prefix}__Child=nested-value\n");
 
         var builder = new ConfigurationBuilder();
@@ -112,7 +99,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void NoHostPrefix_AllKeysTreatedAsGeneric()
     {
         var key = UniqueKey("GENERIC");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env", $"{key}=generic-value\n");
 
         var builder = new ConfigurationBuilder();
@@ -127,7 +113,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     {
         var suffix = UniqueKey("HOSTKEY");
         var hostPrefix = "ApiHost__";
-        _envVarsToClean.Add(suffix);
         _tempDirectory.WriteFile(".env", $"{hostPrefix}{suffix}=host-specific-value\n");
 
         var builder = new ConfigurationBuilder();
@@ -157,7 +142,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void KeyMatchingNoKnownPrefix_AlwaysAppliedAsGeneric()
     {
         var key = UniqueKey("UNPREFIXED");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env", $"{key}=always-applies\n");
 
         var builder = new ConfigurationBuilder();
@@ -171,7 +155,6 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
     public void DotEnvSources_InsertedBeforeEnvironmentVariablesSource()
     {
         var key = UniqueKey("ORDER");
-        _envVarsToClean.Add(key);
         _tempDirectory.WriteFile(".env", $"{key}=dotenv-value\n");
 
         var builder = new ConfigurationBuilder();
@@ -189,5 +172,63 @@ public sealed class AddSyntaxCircusDotEnvFilesTests : IDisposable
             .index;
 
         memorySourceIndex.ShouldBeLessThan(environmentSourceIndex);
+    }
+
+    [Fact]
+    public void MultipleEnvironmentVariablesSources_DotEnvInsertedAfterLastOne()
+    {
+        // Shaped like WebApplicationBuilder.Configuration.Sources: an early
+        // EnvironmentVariablesConfigurationSource added by host bootstrap, then an
+        // appsettings.json-equivalent source, then the "real" EnvironmentVariablesConfigurationSource
+        // that's meant to win over appsettings.json. Dotenv should be inserted right before the
+        // *last* one, so it overrides the appsettings-equivalent source but still loses to real
+        // process env vars.
+        var key = UniqueKey("MULTIENV");
+        _tempDirectory.WriteFile(".env.local", $"{key}=from-dotenv\n");
+
+        var builder = new ConfigurationBuilder();
+        builder.AddEnvironmentVariables();
+        builder.AddInMemoryCollection(new Dictionary<string, string?> { [key] = "from-appsettings" });
+        builder.AddEnvironmentVariables();
+
+        builder.AddSyntaxCircusDotEnvFiles(_tempDirectory.Path);
+        var configuration = builder.Build();
+
+        configuration[key].ShouldBe("from-dotenv");
+    }
+
+    [Fact]
+    public void WebApplicationBuilder_DotEnvOverridesAppSettingsJson()
+    {
+        var key = UniqueKey("WEBAPP");
+        _tempDirectory.WriteFile("appsettings.json", $$"""{"{{key}}": "from-appsettings"}""");
+        _tempDirectory.WriteFile(".env.local", $"{key}=from-dotenv\n");
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = _tempDirectory.Path,
+            EnvironmentName = "Development",
+        });
+
+        builder.Configuration.AddSyntaxCircusDotEnvFiles(_tempDirectory.Path);
+
+        builder.Configuration[key].ShouldBe("from-dotenv");
+    }
+
+    [Fact]
+    public void CalledMultipleTimes_DoesNotMutateRealProcessEnvironment()
+    {
+        var keyA = UniqueKey("NOMUTATE_A");
+        var keyB = UniqueKey("NOMUTATE_B");
+        using var otherTempDirectory = new TempDirectory();
+        _tempDirectory.WriteFile(".env", $"{keyA}=value-a\n");
+        otherTempDirectory.WriteFile(".env", $"{keyB}=value-b\n");
+
+        var builder = new ConfigurationBuilder();
+        builder.AddSyntaxCircusDotEnvFiles(_tempDirectory.Path);
+        builder.AddSyntaxCircusDotEnvFiles(otherTempDirectory.Path);
+
+        Environment.GetEnvironmentVariable(keyA).ShouldBeNull();
+        Environment.GetEnvironmentVariable(keyB).ShouldBeNull();
     }
 }
