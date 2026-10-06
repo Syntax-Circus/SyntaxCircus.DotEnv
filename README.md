@@ -54,6 +54,27 @@ With `hostPrefix`/`knownHostPrefixes` (see below), the same table applies to key
 matching prefix; a key like `MyAppApi__Foo` in a shared `.env` only participates when
 `hostPrefix: "MyAppApi__"` is passed for that host.
 
+### Project-only file discovery
+
+The existing `AddSyntaxCircusDotEnvFiles` API searches ancestors when a file is absent
+from the supplied directory. To keep configuration local to one project, opt in to
+`AddSyntaxCircusProjectDotEnvFiles` instead:
+
+```csharp
+if (builder.Configuration.ShouldLoadDotEnv(builder.Environment))
+{
+    builder.Configuration.AddSyntaxCircusProjectDotEnvFiles(builder.Environment.ContentRootPath);
+}
+```
+
+Pass an absolute project directory (relative paths are rejected). Only that directory's
+`.env` and `.env.local` are loaded, in that order; either or both files may be missing.
+There is no ancestor fallback. This controls file discovery; it is not a symlink security
+sandbox. Key mapping, optional `hostPrefix`/`knownHostPrefixes`, and configuration precedence
+are the same as the existing API. It does not mutate process environment variables.
+The host still controls loading with `ShouldLoadDotEnv`; existing API defaults and
+`DotEnvProcessLoader` behavior are unchanged.
+
 ### Monorepo hosts sharing one `.env` file
 
 If several hosts in the same repo (an API, a Web app, a Worker, ...) share one `.env` file, pass a `hostPrefix` so each host only picks up its own overrides plus whatever isn't prefixed at all:
