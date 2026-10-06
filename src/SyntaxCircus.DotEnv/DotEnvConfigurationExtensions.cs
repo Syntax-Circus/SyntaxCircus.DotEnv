@@ -26,6 +26,28 @@ public static class DotEnvConfigurationExtensions
         => AddSyntaxCircusDotEnvFiles(configurationBuilder, basePath, hostPrefix: null, knownHostPrefixes: null);
 
     /// <summary>
+    /// Loads optional <c>.env</c> and then <c>.env.local</c> only from the supplied absolute
+    /// project directory, without searching ancestors. Uses the same key mapping, host-prefix
+    /// filtering and configuration precedence as <see cref="AddSyntaxCircusDotEnvFiles(IConfigurationBuilder, string, string, IReadOnlyCollection{string})"/>.
+    /// Does not modify the process environment or decide whether dotenv is enabled.
+    /// </summary>
+    public static IConfigurationBuilder AddSyntaxCircusProjectDotEnvFiles(
+        this IConfigurationBuilder configurationBuilder,
+        string projectDirectory,
+        string? hostPrefix = null,
+        IReadOnlyCollection<string>? knownHostPrefixes = null)
+    {
+        ArgumentNullException.ThrowIfNull(configurationBuilder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
+        if (!Path.IsPathFullyQualified(projectDirectory))
+        {
+            throw new ArgumentException("The project directory must be an absolute path.", nameof(projectDirectory));
+        }
+
+        return AddDotEnvFiles(configurationBuilder, projectDirectory, hostPrefix, knownHostPrefixes, traversePath: false);
+    }
+
+    /// <summary>
     /// Loads <c>.env</c>/<c>.env.local</c> the same way as the single-argument overload, but when
     /// <paramref name="hostPrefix"/> is supplied, keys starting with any prefix in
     /// <paramref name="knownHostPrefixes"/> (defaulting to just <paramref name="hostPrefix"/>
@@ -45,6 +67,16 @@ public static class DotEnvConfigurationExtensions
         ArgumentNullException.ThrowIfNull(configurationBuilder);
         ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
 
+        return AddDotEnvFiles(configurationBuilder, basePath, hostPrefix, knownHostPrefixes, traversePath: true);
+    }
+
+    private static IConfigurationBuilder AddDotEnvFiles(
+        IConfigurationBuilder configurationBuilder,
+        string basePath,
+        string? hostPrefix,
+        IReadOnlyCollection<string>? knownHostPrefixes,
+        bool traversePath)
+    {
         IReadOnlyCollection<string> reservedPrefixes = knownHostPrefixes is { Count: > 0 }
             ? knownHostPrefixes
             : string.IsNullOrWhiteSpace(hostPrefix) ? [] : [hostPrefix];
@@ -52,7 +84,7 @@ public static class DotEnvConfigurationExtensions
         var insertIndex = FindEnvironmentOverrideInsertIndex(configurationBuilder);
         foreach (var fileName in DotEnvFileNames)
         {
-            var pairs = LoadMappedPairs(basePath, fileName, hostPrefix, reservedPrefixes);
+            var pairs = LoadMappedPairs(basePath, fileName, hostPrefix, reservedPrefixes, traversePath);
 
             if (pairs.Count != 0)
             {
@@ -67,12 +99,19 @@ public static class DotEnvConfigurationExtensions
         string basePath,
         string fileName,
         string? hostPrefix,
-        IReadOnlyCollection<string> reservedPrefixes)
+        IReadOnlyCollection<string> reservedPrefixes,
+        bool traversePath)
     {
         var generic = new List<KeyValuePair<string, string?>>();
         var hostSpecific = new List<KeyValuePair<string, string?>>();
 
-        foreach (var pair in Env.NoEnvVars().TraversePath().Load(Path.Combine(basePath, fileName)))
+        var loader = Env.NoEnvVars();
+        if (traversePath)
+        {
+            loader = loader.TraversePath();
+        }
+
+        foreach (var pair in loader.Load(Path.Combine(basePath, fileName)))
         {
             if (!TryMapKey(pair.Key, hostPrefix, reservedPrefixes, out var mappedKey, out var isHostSpecific))
             {
