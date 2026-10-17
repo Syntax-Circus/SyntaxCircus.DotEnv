@@ -27,7 +27,7 @@ sources that need to outrank dotenv — don't call `AddEnvironmentVariables()` a
 
 The default is enabled in Development and disabled elsewhere. Set `DotEnv:Enabled` to `true` or `false` in normal host configuration to override that default.
 
-When enabled, `.env` is loaded before `.env.local`; `.env.local` overrides it. Both are below process/container environment variables and user secrets. Keys using `__` map to the normal `:` configuration path separator.
+When enabled, `.env` is loaded before `.env.local`; `.env.local` overrides it. Both are below process/container environment variables and below an explicit `AddUserSecrets` call made after them (but above the user secrets the framework registers on its own in Development). Keys using `__` map to the normal `:` configuration path separator.
 
 ### Precedence, worked examples
 
@@ -35,11 +35,14 @@ From lowest to highest priority (last one wins), for the standard registration s
 
 1. `appsettings.json`
 2. `appsettings.{Environment}.json`
-3. `.env`
-4. `.env.local`
-5. Real process/container environment variables (`AddEnvironmentVariables()`)
-6. Command-line arguments
-7. `AddUserSecrets<T>()`
+3. User secrets that `WebApplication.CreateBuilder` registers automatically in Development
+4. `.env`
+5. `.env.local`
+6. Real process/container environment variables (`AddEnvironmentVariables()`)
+7. Command-line arguments
+8. `AddUserSecrets<T>()` called explicitly after `AddSyntaxCircusDotEnvFiles`
+
+Framework-added user secrets lose to dotenv; an explicit `AddUserSecrets` call after `AddSyntaxCircusDotEnvFiles` wins over everything above it.
 
 Given a key `Foo` set in some combination of these sources:
 
